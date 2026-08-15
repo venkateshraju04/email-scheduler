@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { prisma } from "./client";
+import { prisma } from "./client.js";
 
 async function main() {
     const sender = await prisma.sender.create({
