@@ -26,20 +26,9 @@ router.post("/", async (req: Request, res: Response, next: NextFunction) => {
     }
 
 
-    let user = await prisma.user.findFirst();
-    if (!user) {
-      user = await prisma.user.create({
-        data: {
-          googleId: "test-google-id",
-          email: "test@example.com",
-          name: "Test User",
-        },
-      });
-    }
-
     const campaign = await prisma.campaign.create({
       data: {
-        userId: user.id,
+        userId: req.user!.userId,
         subject: data.subject,
         body: data.body,
         delayBetweenMs: data.delayBetweenMs,

@@ -6,7 +6,9 @@ import "./queue/emailWorker.js";
 
 import { campaignRouter } from "./routes/campaign.routes.js";
 import { emailRouter } from "./routes/email.routes.js";
+import { authRouter } from "./routes/auth.routes.js";
 import { errorHandler } from "./middleware/errorHandler.js";
+import { authMiddleware } from "./middleware/auth.js";
 
 dotenv.config();
 
@@ -20,8 +22,9 @@ app.get("/health", (_req: Request, res: Response) => {
   res.status(200).json({ status: "ok" });
 });
 
-app.use("/campaigns", campaignRouter);
-app.use("/emails", emailRouter);
+app.use("/auth", authRouter);
+app.use("/campaigns", authMiddleware, campaignRouter);
+app.use("/emails", authMiddleware, emailRouter);
 
 app.use(errorHandler);
 
