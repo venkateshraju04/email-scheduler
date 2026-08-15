@@ -76,6 +76,67 @@ app.post("/test-schedule", async (req, res) => {
   }
 });
 
+app.post("/test-schedule-bulk", async (req, res) => {
+  try {
+    const count = req.body.count ?? 10;
+    const hourlyLimit = req.body.hourlyLimit ?? 3;
+
+    const sender = await prisma.sender.findFirst();
+    if (!sender) {
+      return res.status(400).json({ error: "No sender seeded" });
+    }
+
+    let user = await prisma.user.findFirst();
+    if (!user) {
+      user = await prisma.user.create({
+        data: { googleId: "test-google-id", email: "test@example.com", name: "Test User" },
+      });
+    }
+
+    const campaign = await prisma.campaign.create({
+      data: {
+        userId: user.id,
+        subject: "Bulk Rate-Limit Test",
+        body: "<p>Testing rate limiting.</p>",
+        delayBetweenMs: 1000,
+        hourlyLimit,
+        startTime: new Date(),
+        totalRecipients: count,
+      },
+    });
+
+    const emailJobsData = Array.from({ length: count }, (_, i) => ({
+      campaignId: campaign.id,
+      senderId: sender.id,
+      recipient: `test-recipient-${i}@example.com`,
+      scheduledAt: new Date(),
+      status: "queued",
+    }));
+
+    await prisma.emailJob.createMany({ data: emailJobsData });
+
+    const emailJobs = await prisma.emailJob.findMany({ where: { campaignId: campaign.id } });
+
+    const bullJobs = await emailQueue.addBulk(
+      emailJobs.map((ej) => ({
+        name: "send-email",
+        data: { emailJobId: ej.id },
+        opts: { delay: 2000 },
+      }))
+    );
+
+    res.json({
+      campaignId: campaign.id,
+      scheduled: bullJobs.length,
+      hourlyLimit,
+      message: `Watch the console — expect ${hourlyLimit} sent immediately, rest rescheduled`,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to bulk schedule" });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
 });

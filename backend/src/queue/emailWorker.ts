@@ -1,11 +1,12 @@
-import { Worker } from "bullmq";
+import { Worker, DelayedError } from "bullmq";
 import { connection } from "./connection.js";
 import { prisma } from "../db/client.js";
 import { sendEmail } from "../services/mailer.service.js";
+import { checkAndIncrementRateLimit } from "../services/rateLimiter.service.js";
 
 export const emailWorker = new Worker(
     "email-sending",
-    async (job) => {
+    async (job, token) => {
         const { emailJobId } = job.data;
 
         const emailJob = await prisma.emailJob.findUnique({
@@ -21,6 +22,25 @@ export const emailWorker = new Worker(
         if (emailJob.status === "sent") {
             console.log(`EmailJob ${emailJobId} already sent — skipping`);
             return;
+        }
+
+        const hourlyLimit = emailJob.campaign.hourlyLimit;
+        const { allowed } = await checkAndIncrementRateLimit(emailJob.senderId, hourlyLimit);
+
+        if (!allowed) {
+            const nextHour = new Date();
+            nextHour.setHours(nextHour.getHours() + 1, 0, 0, 0);
+
+            await job.moveToDelayed(nextHour.getTime(), token);
+
+            await prisma.emailJob.update({
+                where: { id: emailJobId },
+                data: { status: "delayed_retry" },
+            });
+
+            console.log(`Rate limit hit for sender ${emailJob.senderId} — rescheduled to ${nextHour.toISOString()}`);
+
+            throw new DelayedError();
         }
 
         const result = await sendEmail({
