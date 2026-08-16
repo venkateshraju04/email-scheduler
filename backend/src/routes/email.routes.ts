@@ -5,19 +5,19 @@ const router = Router();
 
 router.get("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { status, limit = "20", offset = "0" } = req.query;
+    const { status, limit = "200", offset = "0" } = req.query;
 
     if (!status || (status !== "scheduled" && status !== "sent")) {
-       res.status(400).json({ error: "Invalid or missing 'status' query parameter. Must be 'scheduled' or 'sent'." });
-       return;
+      res.status(400).json({ error: "Invalid or missing 'status' query parameter. Must be 'scheduled' or 'sent'." });
+      return;
     }
 
     const take = parseInt(limit as string, 10);
     const skip = parseInt(offset as string, 10);
 
     if (isNaN(take) || isNaN(skip) || take < 0 || skip < 0) {
-        res.status(400).json({ error: "Invalid 'limit' or 'offset' query parameter." });
-        return;
+      res.status(400).json({ error: "Invalid 'limit' or 'offset' query parameter." });
+      return;
     }
 
     const statusFilter = status === "scheduled"
@@ -26,7 +26,10 @@ router.get("/", async (req: Request, res: Response, next: NextFunction) => {
 
     const emailJobs = await prisma.emailJob.findMany({
       where: { status: statusFilter },
-      include: { campaign: { select: { subject: true } } },
+      include: {
+        campaign: { select: { subject: true, body: true } },
+        sender: { select: { email: true } },
+      },
       take,
       skip,
       orderBy: status === "scheduled" ? { scheduledAt: "asc" } : { sentAt: "desc" },
@@ -36,18 +39,16 @@ router.get("/", async (req: Request, res: Response, next: NextFunction) => {
       where: { status: statusFilter },
     });
 
-    const formattedEmails = emailJobs.map((job) => {
-      const base = {
-        email: job.recipient,
-        subject: job.campaign?.subject || "",
-        status: job.status,
-      };
-      
-      if (status === "scheduled") {
-          return { ...base, scheduledAt: job.scheduledAt };
-      }
-      return { ...base, sentAt: job.sentAt };
-    });
+    const formattedEmails = emailJobs.map((job) => ({
+      id: job.id,
+      email: job.recipient,
+      subject: job.campaign?.subject || "",
+      body: job.campaign?.body || "",
+      senderEmail: job.sender?.email || "",
+      status: job.status,
+      scheduledAt: job.scheduledAt,
+      sentAt: job.sentAt,
+    }));
 
     res.json({
       emails: formattedEmails,

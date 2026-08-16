@@ -73,7 +73,7 @@ export const emailWorker = new Worker(
             console.error(`Failed to send ${emailJobId}:`, result.error);
         }
     },
-    { connection, concurrency: 5 }
+    { connection, concurrency: Number(process.env.WORKER_CONCURRENCY) || 5 }
 );
 
 emailWorker.on("failed", (job, err) => {

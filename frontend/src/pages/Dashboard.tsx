@@ -1,14 +1,18 @@
+import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { Spinner } from '../components/ui/Spinner';
 import { Badge } from '../components/ui/Badge';
 import { format } from 'date-fns';
-import { Inbox } from 'lucide-react';
+import { Inbox, ArrowLeft } from 'lucide-react';
 
 interface EmailJob {
+  id: string;
   email: string;
   subject: string;
+  body: string;
+  senderEmail: string;
   status: string;
   scheduledAt?: string;
   sentAt?: string;
@@ -17,6 +21,7 @@ interface EmailJob {
 export const Dashboard = () => {
   const [searchParams] = useSearchParams();
   const tab = searchParams.get('tab') || 'scheduled';
+  const [selectedEmail, setSelectedEmail] = useState<EmailJob | null>(null);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['emails', tab],
@@ -24,19 +29,15 @@ export const Dashboard = () => {
       const res = await api.get(`/emails?status=${tab}`);
       return res.data;
     },
-    refetchInterval: 5000, // Poll every 5s for job updates
+    refetchInterval: 5000,
   });
 
   const getStatusBadge = (job: EmailJob) => {
-    if (tab === 'scheduled') {
-      return (
-        <Badge variant="gray" className="gap-1 rounded-md px-2 py-1 text-[11px]">
-          {job.scheduledAt ? format(new Date(job.scheduledAt), 'MMM d, h:mm a') : 'Unknown'}
-        </Badge>
-      );
-    }
-    
     switch (job.status) {
+      case 'queued':
+        return <Badge variant="gray">Queued</Badge>;
+      case 'delayed_retry':
+        return <Badge variant="warning">Rate Limited</Badge>;
       case 'sent':
         return <Badge variant="success">Sent</Badge>;
       case 'failed':
@@ -46,16 +47,72 @@ export const Dashboard = () => {
     }
   };
 
-  // Function no longer needed since body isn't returned, but keeping it empty just in case
-  const getPlainText = (html: string) => '';
+  const formatTime = (dateStr?: string) => {
+    if (!dateStr) return '—';
+    try {
+      return format(new Date(dateStr), 'MMM d, yyyy h:mm:ss a');
+    } catch {
+      return '—';
+    }
+  };
 
+  const isScheduled = tab === 'scheduled';
+
+  // Detail view when an email is selected
+  if (selectedEmail) {
+    return (
+      <div className="flex h-full w-full flex-col bg-white">
+        {/* Detail header */}
+        <header className="flex h-14 shrink-0 items-center gap-3 border-b border-gray-200 px-6">
+          <button
+            onClick={() => setSelectedEmail(null)}
+            className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+          <h2 className="text-sm font-semibold text-gray-900 truncate">{selectedEmail.subject}</h2>
+          <div className="ml-auto">{getStatusBadge(selectedEmail)}</div>
+        </header>
+
+        {/* Detail body */}
+        <div className="flex-1 overflow-auto p-6">
+          <div className="max-w-2xl space-y-4">
+            <div className="flex flex-col gap-2 text-sm border-b border-gray-100 pb-4">
+              <div className="flex gap-2">
+                <span className="font-medium text-gray-500 w-16">From:</span>
+                <span className="text-gray-900">{selectedEmail.senderEmail}</span>
+              </div>
+              <div className="flex gap-2">
+                <span className="font-medium text-gray-500 w-16">To:</span>
+                <span className="text-gray-900">{selectedEmail.email}</span>
+              </div>
+              <div className="flex gap-2">
+                <span className="font-medium text-gray-500 w-16">
+                  {selectedEmail.sentAt ? 'Sent:' : 'Scheduled:'}
+                </span>
+                <span className="text-gray-900">
+                  {selectedEmail.sentAt
+                    ? formatTime(selectedEmail.sentAt)
+                    : formatTime(selectedEmail.scheduledAt)}
+                </span>
+              </div>
+            </div>
+
+            <div className="prose prose-sm max-w-none">
+              <div dangerouslySetInnerHTML={{ __html: selectedEmail.body }} />
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // List view
   return (
     <div className="flex h-full w-full flex-col bg-white">
-      {/* Top Search Bar */}
-      <header className="flex h-16 shrink-0 items-center justify-between border-b border-gray-100 px-6">
+      <header className="flex h-14 shrink-0 items-center justify-between border-b border-gray-200 px-6">
         <div className="flex flex-1 items-center gap-2">
-          {/* visual only */}
-          <div className="relative w-96 max-w-full">
+          <div className="relative w-80 max-w-full">
             <input
               type="text"
               placeholder="Search..."
@@ -63,54 +120,67 @@ export const Dashboard = () => {
             />
           </div>
         </div>
+        <div className="text-xs text-gray-400">
+          {data?.total !== undefined && `${data.total} total`}
+        </div>
       </header>
 
-      {/* Main List Area */}
-      <div className="flex-1 overflow-auto bg-white">
+      <div className="flex-1 overflow-auto">
         {isLoading ? (
           <div className="flex h-full items-center justify-center">
             <Spinner size="lg" />
           </div>
         ) : error ? (
-          <div className="flex h-full items-center justify-center text-red-500">
-            Failed to load emails
+          <div className="flex h-full items-center justify-center text-red-500 text-sm">
+            Failed to load emails. Please try again.
           </div>
-        ) : data?.emails?.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center text-gray-500 gap-3">
-            <div className="rounded-full bg-gray-50 p-4">
-              <Inbox className="h-8 w-8 text-gray-400" />
+        ) : !data?.emails?.length ? (
+          <div className="flex h-full flex-col items-center justify-center text-gray-400 gap-3">
+            <div className="rounded-full bg-gray-50 p-5">
+              <Inbox className="h-10 w-10" />
             </div>
-            <p className="text-sm font-medium">No {tab} emails yet</p>
+            <p className="text-sm font-medium">
+              No {isScheduled ? 'scheduled' : 'sent'} emails yet
+            </p>
+            <p className="text-xs">
+              {isScheduled ? 'Compose an email to get started.' : 'Scheduled emails will appear here once sent.'}
+            </p>
           </div>
         ) : (
-          <div className="flex flex-col">
-            {data?.emails?.map((job: EmailJob, index: number) => (
-              <div 
-                key={index} 
-                className="group flex cursor-pointer items-center border-b border-gray-100 px-6 py-4 hover:bg-gray-50 transition-colors"
-              >
-                <div className="w-[200px] shrink-0 pr-4 text-sm font-medium text-gray-900 truncate">
-                  To: {job.email}
-                </div>
-                
-                <div className="flex flex-1 items-center gap-4 min-w-0 pr-4">
-                  <div className="shrink-0">{getStatusBadge(job)}</div>
-                  <div className="flex-1 truncate text-sm">
-                    <span className="font-semibold text-gray-900 mr-2">{job.subject}</span>
-                  </div>
-                </div>
-                
-                {/* Decorative Star */}
-                <div className="shrink-0">
-                  <button className="text-gray-300 hover:text-yellow-400 focus:outline-none">
-                    <svg className="h-5 w-5 fill-current" viewBox="0 0 20 20">
-                      <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                    </svg>
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
+          <table className="w-full text-sm">
+            <thead className="sticky top-0 bg-gray-50 border-b border-gray-200">
+              <tr>
+                <th className="text-left font-medium text-gray-500 px-6 py-3">Email</th>
+                <th className="text-left font-medium text-gray-500 px-4 py-3">Subject</th>
+                <th className="text-left font-medium text-gray-500 px-4 py-3">
+                  {isScheduled ? 'Scheduled Time' : 'Sent Time'}
+                </th>
+                <th className="text-left font-medium text-gray-500 px-4 py-3">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.emails.map((job: EmailJob) => (
+                <tr
+                  key={job.id}
+                  onClick={() => setSelectedEmail(job)}
+                  className="border-b border-gray-100 hover:bg-gray-50 transition-colors cursor-pointer"
+                >
+                  <td className="px-6 py-3.5 font-medium text-gray-900 truncate max-w-[220px]">
+                    {job.email}
+                  </td>
+                  <td className="px-4 py-3.5 text-gray-700 truncate max-w-[280px]">
+                    {job.subject}
+                  </td>
+                  <td className="px-4 py-3.5 text-gray-500 whitespace-nowrap">
+                    {isScheduled ? formatTime(job.scheduledAt) : formatTime(job.sentAt)}
+                  </td>
+                  <td className="px-4 py-3.5">
+                    {getStatusBadge(job)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
       </div>
     </div>

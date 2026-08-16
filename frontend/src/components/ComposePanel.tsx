@@ -2,9 +2,9 @@ import React, { useState, useRef } from 'react';
 import { useForm as useHookForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Papa from 'papaparse';
-import { addDays, setHours, setMinutes } from 'date-fns';
+import { addDays, setHours, setMinutes, format } from 'date-fns';
 import { Paperclip, Clock, Upload, Bold, Italic, Underline } from 'lucide-react';
 
 import { api } from '../lib/api';
@@ -14,14 +14,16 @@ import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { Chip } from './ui/Chip';
 import { Spinner } from './ui/Spinner';
+import { showToast } from './ui/Toast';
 
 const composeSchema = z.object({
   recipients: z.array(z.string().email('Invalid email address')).min(1, 'At least one recipient is required'),
   subject: z.string().min(1, 'Subject is required'),
   body: z.string().min(1, 'Body is required'),
-  delayBetweenMs: z.number().min(0),
-  hourlyLimit: z.number().min(1),
+  delaySeconds: z.number().min(0, 'Delay must be 0 or more'),
+  hourlyLimit: z.number().min(1, 'Must be at least 1'),
   startTime: z.date().optional(),
+  senderId: z.string().optional(),
 });
 
 type ComposeFormValues = z.infer<typeof composeSchema>;
@@ -34,16 +36,18 @@ interface ComposePanelProps {
 export const ComposePanel: React.FC<ComposePanelProps> = ({ isOpen, onClose }) => {
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
-  const { register, handleSubmit, control, setValue, watch, formState: { errors } } = useHookForm<ComposeFormValues>({
+  const [csvFileCount, setCsvFileCount] = useState<number | null>(null);
+
+  const { register, handleSubmit, control, setValue, watch, reset, formState: { errors } } = useHookForm<ComposeFormValues>({
     resolver: zodResolver(composeSchema),
     defaultValues: {
       recipients: [],
       subject: '',
       body: '',
-      delayBetweenMs: 1000,
+      delaySeconds: 2,
       hourlyLimit: 100,
       startTime: undefined,
+      senderId: undefined,
     }
   });
 
@@ -51,19 +55,44 @@ export const ComposePanel: React.FC<ComposePanelProps> = ({ isOpen, onClose }) =
   const startTime = watch('startTime');
   const [recipientInput, setRecipientInput] = useState('');
 
+  // Gap 3: Fetch available senders for the dropdown
+  const { data: sendersData } = useQuery({
+    queryKey: ['senders'],
+    queryFn: async () => {
+      const res = await api.get('/senders');
+      return res.data;
+    },
+    enabled: isOpen,
+  });
+
   const createCampaign = useMutation({
     mutationFn: async (data: ComposeFormValues) => {
+      // Gap 2: Convert seconds → milliseconds before POSTing
       const payload = {
-        ...data,
-        startTime: data.startTime?.toISOString() || new Date().toISOString(),
+        subject: data.subject,
+        body: data.body,
+        recipients: data.recipients,
+        startTime: (startTime || data.startTime)?.toISOString() || new Date().toISOString(),
+        delayBetweenMs: data.delaySeconds * 1000,
+        hourlyLimit: data.hourlyLimit,
+        senderId: data.senderId || undefined,
       };
+      console.log('Sending Payload:', payload);
       const res = await api.post('/campaigns', payload);
       return res.data;
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['emails'] });
+      // Gap 8: Success toast
+      showToast(`Campaign scheduled — ${data.scheduledCount} emails queued!`, 'success');
+      reset();
+      setCsvFileCount(null);
       onClose();
-      // Reset form could be handled here or just unmount clears it if we change key
+    },
+    onError: (err: any) => {
+      // Gap 9: Error toast
+      const msg = err?.response?.data?.error || 'Failed to schedule campaign. Please try again.';
+      showToast(msg, 'error');
     },
   });
 
@@ -81,9 +110,12 @@ export const ComposePanel: React.FC<ComposePanelProps> = ({ isOpen, onClose }) =
           .flat()
           .map((v) => String(v).trim())
           .filter((v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v));
-        
+
         const uniqueEmails = Array.from(new Set([...recipients, ...emails]));
         setValue('recipients', uniqueEmails, { shouldValidate: true });
+        // Gap 10: Show how many emails were detected from the file
+        setCsvFileCount(emails.length);
+        showToast(`${emails.length} email addresses detected from CSV`, 'success');
       },
     });
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -109,26 +141,42 @@ export const ComposePanel: React.FC<ComposePanelProps> = ({ isOpen, onClose }) =
     let time: Date = now;
     if (label === 'Tomorrow 10 AM') {
       time = setHours(setMinutes(addDays(now, 1), 0), 10);
+    } else if (label === 'Tomorrow 11 AM') {
+      time = setHours(setMinutes(addDays(now, 1), 0), 11);
     } else if (label === 'Tomorrow 3 PM') {
       time = setHours(setMinutes(addDays(now, 1), 0), 15);
     }
     setValue('startTime', time);
   };
 
-  const popoverContent = (
+  const popoverContent = (close: () => void) => (
     <div className="p-4">
       <h3 className="mb-3 text-sm font-semibold text-gray-900">Send Later</h3>
-      <input 
-        type="datetime-local" 
+      <input
+        type="datetime-local"
         className="mb-3 w-full rounded-md border border-gray-200 px-3 py-2 text-sm"
-        onChange={(e) => setValue('startTime', new Date(e.target.value))}
+        value={startTime ? format(startTime, "yyyy-MM-dd'T'HH:mm") : ''}
+        onChange={(e) => {
+          if (e.target.value) {
+            setValue('startTime', new Date(e.target.value));
+          } else {
+            setValue('startTime', undefined);
+          }
+        }}
       />
-      <div className="flex flex-col gap-1 mb-4">
-        <button type="button" onClick={() => setPresetTime('Tomorrow 10 AM')} className="text-left text-sm text-gray-600 hover:bg-gray-50 px-2 py-1 rounded">Tomorrow, 10:00 AM</button>
-        <button type="button" onClick={() => setPresetTime('Tomorrow 3 PM')} className="text-left text-sm text-gray-600 hover:bg-gray-50 px-2 py-1 rounded">Tomorrow, 3:00 PM</button>
+      <div className="flex flex-col gap-1 mb-3">
+        <button type="button" onClick={() => setPresetTime('Tomorrow 10 AM')} className="text-left text-sm text-gray-600 hover:bg-gray-50 px-2 py-1.5 rounded">Tomorrow, 10:00 AM</button>
+        <button type="button" onClick={() => setPresetTime('Tomorrow 11 AM')} className="text-left text-sm text-gray-600 hover:bg-gray-50 px-2 py-1.5 rounded">Tomorrow, 11:00 AM</button>
+        <button type="button" onClick={() => setPresetTime('Tomorrow 3 PM')} className="text-left text-sm text-gray-600 hover:bg-gray-50 px-2 py-1.5 rounded">Tomorrow, 3:00 PM</button>
+      </div>
+      <div className="flex justify-end gap-2 border-t border-gray-100 pt-3">
+        <Button variant="ghost" size="sm" onClick={() => { setValue('startTime', undefined); close(); }}>Clear</Button>
+        <Button size="sm" onClick={close}>Done</Button>
       </div>
     </div>
   );
+
+  const senders = sendersData?.senders || [];
 
   return (
     <SlideOver
@@ -140,9 +188,9 @@ export const ComposePanel: React.FC<ComposePanelProps> = ({ isOpen, onClose }) =
           <button type="button" className="p-2 text-gray-400 hover:text-gray-600">
             <Paperclip className="h-5 w-5" />
           </button>
-          <Popover 
-            trigger={<button type="button" className="p-2 text-gray-400 hover:text-gray-600"><Clock className="h-5 w-5" /></button>} 
-            content={popoverContent} 
+          <Popover
+            trigger={<button type="button" className="p-2 text-gray-400 hover:text-gray-600"><Clock className="h-5 w-5" /></button>}
+            content={popoverContent}
           />
           <Button onClick={handleSubmit(onSubmit)} disabled={createCampaign.isPending}>
             {createCampaign.isPending ? <Spinner size="sm" className="mr-2" /> : null}
@@ -151,24 +199,27 @@ export const ComposePanel: React.FC<ComposePanelProps> = ({ isOpen, onClose }) =
         </>
       }
     >
-      <form className="flex flex-col gap-6" onSubmit={handleSubmit(onSubmit)}>
-        {createCampaign.isError && (
-          <div className="rounded-md bg-red-50 p-4 text-sm text-red-600">
-            Failed to schedule campaign. Please try again.
-          </div>
-        )}
-
+      <form className="flex flex-col gap-5" onSubmit={handleSubmit(onSubmit)}>
+        
+        {/* Gap 3: Sender dropdown */}
         <div className="flex flex-col gap-1">
           <label className="text-sm font-medium text-gray-700">From</label>
-          <select disabled className="h-10 rounded-lg bg-gray-50 px-3 text-sm text-gray-900 outline-none">
-            <option>Default Sender (from DB)</option>
+          <select
+            {...register('senderId')}
+            className="h-10 rounded-lg bg-gray-50 px-3 text-sm text-gray-900 outline-none focus:ring-2 focus:ring-[#4CAF50]"
+          >
+            <option value="">Default Sender</option>
+            {senders.map((s: { id: string; email: string }) => (
+              <option key={s.id} value={s.id}>{s.email}</option>
+            ))}
           </select>
         </div>
 
+        {/* Recipients with CSV upload */}
         <div className="flex flex-col gap-1">
           <label className="text-sm font-medium text-gray-700">To</label>
           <div className="flex flex-col sm:flex-row sm:items-start gap-2">
-            <div className="flex-1 rounded-lg bg-gray-50 p-2 min-h-[40px] flex flex-wrap items-center gap-2 focus-within:ring-2 focus-within:ring-[#4CAF50]">
+            <div className="flex-1 rounded-lg bg-gray-50 p-2 min-h-[40px] flex flex-wrap items-center gap-1.5 focus-within:ring-2 focus-within:ring-[#4CAF50]">
               {recipients.slice(0, 3).map((r) => (
                 <Chip key={r} label={r} onRemove={() => removeRecipient(r)} />
               ))}
@@ -185,7 +236,7 @@ export const ComposePanel: React.FC<ComposePanelProps> = ({ isOpen, onClose }) =
               />
             </div>
             <div className="shrink-0 pt-1">
-              <input type="file" accept=".csv" className="hidden" ref={fileInputRef} onChange={handleFileUpload} />
+              <input type="file" accept=".csv,.txt" className="hidden" ref={fileInputRef} onChange={handleFileUpload} />
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
@@ -196,33 +247,42 @@ export const ComposePanel: React.FC<ComposePanelProps> = ({ isOpen, onClose }) =
               </button>
             </div>
           </div>
-          {recipients.length > 0 && <p className="text-xs text-gray-500 mt-1">{recipients.length} emails added</p>}
+          {/* Gap 10: Prominent count */}
+          {recipients.length > 0 && (
+            <p className="text-xs text-gray-500 mt-1">
+              <span className="font-semibold text-[#4CAF50]">{recipients.length}</span> email{recipients.length !== 1 ? 's' : ''} added
+              {csvFileCount !== null && <span> ({csvFileCount} from CSV)</span>}
+            </p>
+          )}
           {errors.recipients && <p className="text-xs text-red-500">{errors.recipients.message}</p>}
         </div>
 
-        <Input 
-          label="Subject" 
-          placeholder="Subject" 
-          {...register('subject')} 
-          error={errors.subject?.message} 
+        <Input
+          label="Subject"
+          placeholder="Subject"
+          {...register('subject')}
+          error={errors.subject?.message}
         />
 
+        {/* Gap 2: Label clearly says seconds */}
         <div className="grid grid-cols-2 gap-4">
-          <Input 
+          <Input
             type="number"
-            label="Delay between 2 emails (sec)" 
-            {...register('delayBetweenMs', { valueAsNumber: true })} 
-            error={errors.delayBetweenMs?.message} 
+            label="Delay between emails (seconds)"
+            {...register('delaySeconds', { valueAsNumber: true })}
+            error={errors.delaySeconds?.message}
           />
-          <Input 
+          <Input
             type="number"
-            label="Hourly Limit" 
-            {...register('hourlyLimit', { valueAsNumber: true })} 
-            error={errors.hourlyLimit?.message} 
+            label="Hourly Limit"
+            {...register('hourlyLimit', { valueAsNumber: true })}
+            error={errors.hourlyLimit?.message}
           />
         </div>
 
+        {/* Body editor */}
         <div className="flex flex-col gap-1 flex-1">
+          <label className="text-sm font-medium text-gray-700">Body</label>
           <div className="flex items-center gap-1 border-b border-gray-100 pb-2">
             <button type="button" className="p-1.5 text-gray-400 hover:text-gray-600 rounded hover:bg-gray-100"><Bold className="h-4 w-4" /></button>
             <button type="button" className="p-1.5 text-gray-400 hover:text-gray-600 rounded hover:bg-gray-100"><Italic className="h-4 w-4" /></button>

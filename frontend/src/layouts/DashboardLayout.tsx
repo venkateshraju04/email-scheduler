@@ -1,14 +1,37 @@
 import { useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { Clock, Send, LogOut, Edit } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
 import { Button } from '../components/ui/Button';
 import { ComposePanel } from '../components/ComposePanel';
+import { api } from '../lib/api';
 
 export const DashboardLayout = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [isComposeOpen, setIsComposeOpen] = useState(false);
+
+  const { data: scheduledData } = useQuery({
+    queryKey: ['emails', 'scheduled', 'count'],
+    queryFn: async () => {
+      const res = await api.get('/emails?status=scheduled&limit=1');
+      return res.data;
+    },
+    refetchInterval: 5000,
+  });
+
+  const { data: sentData } = useQuery({
+    queryKey: ['emails', 'sent', 'count'],
+    queryFn: async () => {
+      const res = await api.get('/emails?status=sent&limit=1');
+      return res.data;
+    },
+    refetchInterval: 5000,
+  });
+
+  const scheduledCount = scheduledData?.total;
+  const sentCount = sentData?.total;
 
   const handleLogout = () => {
     logout();
@@ -41,9 +64,9 @@ export const DashboardLayout = () => {
 
         {/* Compose Button */}
         <div className="px-6 pb-6">
-          <Button 
-            variant="secondary" 
-            fullWidth 
+          <Button
+            variant="secondary"
+            fullWidth
             className="justify-center gap-2 font-semibold shadow-sm"
             onClick={() => setIsComposeOpen(true)}
           >
@@ -61,10 +84,9 @@ export const DashboardLayout = () => {
             <NavLink
               to="/dashboard?tab=scheduled"
               className={({ isActive }) =>
-                `flex items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-                  isActive || window.location.search.includes('scheduled') || !window.location.search
-                    ? 'bg-[#E8F5E9] text-[#4CAF50]'
-                    : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900'
+                `flex items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition-colors ${isActive || window.location.search.includes('scheduled') || !window.location.search
+                  ? 'bg-[#E8F5E9] text-[#4CAF50]'
+                  : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900'
                 }`
               }
             >
@@ -72,14 +94,18 @@ export const DashboardLayout = () => {
                 <Clock className="h-4 w-4" />
                 Scheduled
               </div>
+              {scheduledCount !== undefined && (
+                <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-600">
+                  {scheduledCount}
+                </span>
+              )}
             </NavLink>
             <NavLink
               to="/dashboard?tab=sent"
               className={() =>
-                `flex items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-                  window.location.search.includes('sent')
-                    ? 'bg-[#E8F5E9] text-[#4CAF50]'
-                    : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900'
+                `flex items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition-colors ${window.location.search.includes('sent')
+                  ? 'bg-[#E8F5E9] text-[#4CAF50]'
+                  : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900'
                 }`
               }
             >
@@ -87,6 +113,11 @@ export const DashboardLayout = () => {
                 <Send className="h-4 w-4" />
                 Sent
               </div>
+              {sentCount !== undefined && (
+                <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-600">
+                  {sentCount}
+                </span>
+              )}
             </NavLink>
           </nav>
         </div>

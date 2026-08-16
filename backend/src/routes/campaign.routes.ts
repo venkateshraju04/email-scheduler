@@ -7,6 +7,7 @@ const router = Router();
 
 router.post("/", async (req: Request, res: Response, next: NextFunction) => {
   try {
+    console.log("RECEIVED PAYLOAD:", req.body);
     const data = createCampaignSchema.parse(req.body);
 
     let senderId = data.senderId;

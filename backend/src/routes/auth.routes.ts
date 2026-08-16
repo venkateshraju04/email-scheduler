@@ -64,6 +64,7 @@ router.post("/google", async (req: Request, res: Response, next: NextFunction) =
         id: user.id,
         email: user.email,
         name: user.name,
+        avatarUrl: picture || null,
       },
     });
   } catch (err) {

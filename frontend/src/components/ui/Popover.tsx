@@ -3,7 +3,7 @@ import { cn } from './Button';
 
 interface PopoverProps {
   trigger: React.ReactNode;
-  content: React.ReactNode;
+  content: React.ReactNode | ((close: () => void) => React.ReactNode);
   className?: string;
 }
 
@@ -23,6 +23,8 @@ export const Popover: React.FC<PopoverProps> = ({ trigger, content, className })
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isOpen]);
 
+  const close = () => setIsOpen(false);
+
   return (
     <div className="relative inline-block text-left" ref={popoverRef}>
       <div onClick={() => setIsOpen(!isOpen)} className="cursor-pointer">
@@ -30,7 +32,7 @@ export const Popover: React.FC<PopoverProps> = ({ trigger, content, className })
       </div>
       {isOpen && (
         <div className={cn("absolute right-0 z-10 mt-2 w-72 origin-top-right rounded-xl bg-white shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none", className)}>
-          {content}
+          {typeof content === 'function' ? content(close) : content}
         </div>
       )}
     </div>
