@@ -25,7 +25,10 @@ router.get("/", async (req: Request, res: Response, next: NextFunction) => {
       : { in: ["sent", "failed"] };
 
     const emailJobs = await prisma.emailJob.findMany({
-      where: { status: statusFilter },
+      where: { 
+        status: statusFilter,
+        campaign: { userId: req.user!.id }
+      },
       include: {
         campaign: { select: { subject: true, body: true } },
         sender: { select: { email: true } },
@@ -36,7 +39,10 @@ router.get("/", async (req: Request, res: Response, next: NextFunction) => {
     });
 
     const total = await prisma.emailJob.count({
-      where: { status: statusFilter },
+      where: { 
+        status: statusFilter,
+        campaign: { userId: req.user!.id }
+      },
     });
 
     const formattedEmails = emailJobs.map((job) => ({
