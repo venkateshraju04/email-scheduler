@@ -27,7 +27,7 @@ router.get("/", async (req: Request, res: Response, next: NextFunction) => {
     const emailJobs = await prisma.emailJob.findMany({
       where: { 
         status: statusFilter,
-        campaign: { userId: req.user!.id }
+        campaign: { userId: req.user!.userId }
       },
       include: {
         campaign: { select: { subject: true, body: true } },
@@ -41,7 +41,7 @@ router.get("/", async (req: Request, res: Response, next: NextFunction) => {
     const total = await prisma.emailJob.count({
       where: { 
         status: statusFilter,
-        campaign: { userId: req.user!.id }
+        campaign: { userId: req.user!.userId }
       },
     });
 
