@@ -3,8 +3,6 @@ import { GoogleLogin, type CredentialResponse } from '@react-oauth/google';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../lib/api';
-import { Input } from '../components/ui/Input';
-import { Button } from '../components/ui/Button';
 
 export const Login = () => {
   const navigate = useNavigate();
@@ -48,35 +46,6 @@ export const Login = () => {
 
           {error && <p className="mb-4 text-sm text-red-500">{error}</p>}
 
-          <div className="relative mb-6 w-full flex items-center justify-center">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-gray-200" />
-            </div>
-            <div className="relative bg-white px-2 text-xs text-gray-400">
-              or sign up through email
-            </div>
-          </div>
-
-          <form className="w-full space-y-4" onSubmit={(e) => e.preventDefault()}>
-            <Input 
-              placeholder="Email ID" 
-              disabled 
-            />
-            <Input 
-              type="password" 
-              placeholder="Password" 
-              disabled 
-            />
-            
-            <Button 
-              type="button" 
-              fullWidth 
-              className="mt-2" 
-              disabled
-            >
-              Login
-            </Button>
-          </form>
         </div>
       </div>
     </div>
